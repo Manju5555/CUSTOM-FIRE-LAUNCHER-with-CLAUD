@@ -12,6 +12,7 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.Typeface;
@@ -28,6 +29,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
+import android.view.WindowManager;
 import android.widget.AdapterView;
 import android.widget.BaseAdapter;
 import android.widget.FrameLayout;
@@ -46,6 +48,7 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -118,6 +121,7 @@ public class HomeActivity extends Activity {
         String label;
         Drawable banner;
         Drawable icon;
+        int[] cardColors;
         Intent launch;
     }
 
@@ -128,11 +132,43 @@ public class HomeActivity extends Activity {
     private GridView grid;
     private ImageView wallpaper;
     private TextView weatherView;
+    private FrameLayout screensaverOverlay;
+    private LinearLayout screensaverCard;
+    private TextView screensaverWeatherView;
+    private boolean screensaverActive = false;
+    private long screensaverStartMs = 0;
+    private int driftStep = 0;
+    private static final long SCREENSAVER_IDLE_MS = 5 * 60 * 1000L; // 5 minutes
     private int selectedAfterMove = -1;
+
+    private final Runnable screensaverIdleTrigger = new Runnable() {
+        @Override
+        public void run() {
+            startScreensaver();
+        }
+    };
+
+    private final Runnable screensaverDriftTick = new Runnable() {
+        @Override
+        public void run() {
+            if (!screensaverActive || screensaverCard == null) return;
+            driftStep++;
+            double angle = driftStep * 0.65;
+            float dx = (float) (Math.sin(angle) * dp(210));
+            float dy = (float) (Math.cos(angle * 0.75) * dp(115));
+            screensaverCard.animate()
+                    .translationX(dx)
+                    .translationY(dy)
+                    .setDuration(4200)
+                    .start();
+            handler.postDelayed(this, 4200);
+        }
+    };
 
     private final Runnable weatherTick = new Runnable() {
         @Override
         public void run() {
+            applyWallpaper();
             fetchWeather();
             handler.postDelayed(this, 30 * 60 * 1000L);
         }
@@ -141,18 +177,32 @@ public class HomeActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        if (!prefs.contains(KEY_WALL)) {
+            prefs.edit().putInt(KEY_WALL, -2).apply(); // Default to Auto Day/Night Mode
+        }
         buildUi();
         applyWallpaper();
+        if (getIntent() != null && getIntent().getBooleanExtra("screensaver", false)) {
+            handler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    startScreensaver();
+                }
+            }, 300);
+        }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         ensureAccessibilityEnabled();
+        applyWallpaper();
         loadApps();
         handler.removeCallbacks(weatherTick);
         handler.post(weatherTick);
+        resetIdleTimer();
     }
 
     private void ensureAccessibilityEnabled() {
@@ -171,6 +221,11 @@ public class HomeActivity extends Activity {
     protected void onPause() {
         super.onPause();
         handler.removeCallbacks(weatherTick);
+        handler.removeCallbacks(screensaverIdleTrigger);
+        handler.removeCallbacks(screensaverDriftTick);
+        if (screensaverActive) {
+            stopScreensaverImmediate();
+        }
     }
 
     @Override
@@ -178,9 +233,77 @@ public class HomeActivity extends Activity {
         super.onNewIntent(intent);
         ensureAccessibilityEnabled();
         loadApps();
-        if (Intent.ACTION_MAIN.equals(intent.getAction()) && grid != null) {
+        if (intent != null && intent.getBooleanExtra("screensaver", false)) {
+            startScreensaver();
+            return;
+        }
+        if (screensaverActive) {
+            stopScreensaver();
+        }
+        resetIdleTimer();
+        if (intent != null && Intent.ACTION_MAIN.equals(intent.getAction()) && grid != null) {
             grid.smoothScrollToPosition(0);
             grid.requestFocus();
+        }
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (screensaverActive) {
+            if (System.currentTimeMillis() - screensaverStartMs > 600
+                    && event.getAction() == KeyEvent.ACTION_DOWN) {
+                stopScreensaver();
+            }
+            return true;
+        }
+        resetIdleTimer();
+        return super.dispatchKeyEvent(event);
+    }
+
+    private void resetIdleTimer() {
+        handler.removeCallbacks(screensaverIdleTrigger);
+        handler.postDelayed(screensaverIdleTrigger, SCREENSAVER_IDLE_MS);
+    }
+
+    private void startScreensaver() {
+        if (screensaverOverlay == null || screensaverActive) return;
+        screensaverActive = true;
+        screensaverStartMs = System.currentTimeMillis();
+        handler.removeCallbacks(screensaverIdleTrigger);
+        handler.removeCallbacks(screensaverDriftTick);
+        if (weatherView != null && weatherView.getText().length() > 0 && screensaverWeatherView != null) {
+            screensaverWeatherView.setText(weatherView.getText());
+        }
+        screensaverCard.setTranslationX(0f);
+        screensaverCard.setTranslationY(0f);
+        screensaverOverlay.setAlpha(0f);
+        screensaverOverlay.setVisibility(View.VISIBLE);
+        screensaverOverlay.animate().alpha(1f).setDuration(800).start();
+        handler.postDelayed(screensaverDriftTick, 400);
+    }
+
+    private void stopScreensaver() {
+        if (!screensaverActive || screensaverOverlay == null) return;
+        screensaverActive = false;
+        handler.removeCallbacks(screensaverDriftTick);
+        screensaverOverlay.animate().alpha(0f).setDuration(320).withEndAction(new Runnable() {
+            @Override
+            public void run() {
+                if (!screensaverActive && screensaverOverlay != null) {
+                    screensaverOverlay.setVisibility(View.GONE);
+                }
+            }
+        }).start();
+        resetIdleTimer();
+    }
+
+    private void stopScreensaverImmediate() {
+        screensaverActive = false;
+        handler.removeCallbacks(screensaverDriftTick);
+        if (screensaverOverlay != null) {
+            screensaverOverlay.animate().cancel();
+            screensaverOverlay.setAlpha(0f);
+            screensaverOverlay.setVisibility(View.GONE);
         }
     }
 
@@ -234,6 +357,17 @@ public class HomeActivity extends Activity {
         bg.addState(new int[]{}, normal);
         b.setBackground(bg);
         b.setOnClickListener(click);
+        b.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            @Override
+            public void onFocusChange(View v, boolean hasFocus) {
+                v.animate()
+                        .scaleX(hasFocus ? 1.07f : 1.0f)
+                        .scaleY(hasFocus ? 1.07f : 1.0f)
+                        .translationZ(hasFocus ? dp(8) : 0f)
+                        .setDuration(150)
+                        .start();
+            }
+        });
         return b;
     }
 
@@ -252,12 +386,16 @@ public class HomeActivity extends Activity {
         LinearLayout column = new LinearLayout(this);
         column.setOrientation(LinearLayout.VERTICAL);
         column.setPadding(dp(44), dp(26), dp(44), dp(14));
+        column.setClipChildren(false);
+        column.setClipToPadding(false);
         root.addView(column, new FrameLayout.LayoutParams(-1, -1));
 
         // Top Header Row: Clock/Date on left, Weather + Wi-Fi & Settings buttons on right
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setClipChildren(false);
+        header.setClipToPadding(false);
         column.addView(header, new LinearLayout.LayoutParams(-1, -2));
 
         LinearLayout clockBox = new LinearLayout(this);
@@ -338,9 +476,10 @@ public class HomeActivity extends Activity {
         grid.setId(ID_GRID);
         grid.setNumColumns(5);
         grid.setHorizontalSpacing(dp(18));
-        grid.setVerticalSpacing(dp(18));
+        grid.setVerticalSpacing(dp(12));
+        grid.setClipChildren(false);
         grid.setClipToPadding(false);
-        grid.setPadding(0, dp(22), 0, dp(20));
+        grid.setPadding(dp(8), dp(14), dp(8), dp(10));
         grid.setSelector(new ColorDrawable(Color.TRANSPARENT));
         grid.setDrawSelectorOnTop(false);
         grid.setVerticalScrollBarEnabled(false);
@@ -349,6 +488,24 @@ public class HomeActivity extends Activity {
         adapter = new AppAdapter();
         grid.setAdapter(adapter);
         column.addView(grid, new LinearLayout.LayoutParams(-1, 0, 1f));
+
+        grid.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                updateGridZoom();
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+                updateGridZoom();
+            }
+        });
+        grid.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            @Override
+            public void onFocusChange(View v, boolean hasFocus) {
+                updateGridZoom();
+            }
+        });
 
         grid.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
@@ -369,6 +526,66 @@ public class HomeActivity extends Activity {
         hint.setTextColor(0x99FFFFFF);
         hint.setTextSize(13);
         column.addView(hint, new LinearLayout.LayoutParams(-2, -2));
+
+        // Full-Screen Ambient Screensaver Overlay (fades in after 5 minutes idle)
+        screensaverOverlay = new FrameLayout(this);
+        screensaverOverlay.setBackgroundColor(0xF604060B);
+        screensaverOverlay.setVisibility(View.GONE);
+        screensaverOverlay.setAlpha(0f);
+
+        screensaverCard = new LinearLayout(this);
+        screensaverCard.setOrientation(LinearLayout.VERTICAL);
+        screensaverCard.setGravity(Gravity.CENTER);
+        screensaverCard.setPadding(dp(48), dp(34), dp(48), dp(34));
+        GradientDrawable ssBg = new GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                new int[]{0x22FFFFFF, 0x0CFFFFFF});
+        ssBg.setCornerRadius(dp(34));
+        ssBg.setStroke(dp(1), 0x33FFFFFF);
+        screensaverCard.setBackground(ssBg);
+
+        TextClock ssClock = new TextClock(this);
+        ssClock.setFormat12Hour("h:mm a");
+        ssClock.setFormat24Hour("h:mm a");
+        ssClock.setTextColor(0xF5FFFFFF);
+        ssClock.setTextSize(82);
+        ssClock.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+        ssClock.setGravity(Gravity.CENTER);
+        screensaverCard.addView(ssClock, new LinearLayout.LayoutParams(-2, -2));
+
+        TextClock ssDate = new TextClock(this);
+        ssDate.setFormat12Hour("EEEE, d MMMM");
+        ssDate.setFormat24Hour("EEEE, d MMMM");
+        ssDate.setTextColor(0xBBFFFFFF);
+        ssDate.setTextSize(22);
+        ssDate.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams ssDateLp = new LinearLayout.LayoutParams(-2, -2);
+        ssDateLp.topMargin = dp(4);
+        screensaverCard.addView(ssDate, ssDateLp);
+
+        screensaverWeatherView = new TextView(this);
+        screensaverWeatherView.setText("\u26C5  26\u00B0C  Mysore");
+        screensaverWeatherView.setTextColor(0xEEFFFFFF);
+        screensaverWeatherView.setTextSize(28);
+        screensaverWeatherView.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        screensaverWeatherView.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams ssWeatherLp = new LinearLayout.LayoutParams(-2, -2);
+        ssWeatherLp.topMargin = dp(18);
+        screensaverCard.addView(screensaverWeatherView, ssWeatherLp);
+
+        TextView ssHint = new TextView(this);
+        ssHint.setText("\uD83C\uDF19  Ambient Anti-Burn-In Mode   \u2022   Press any button to wake");
+        ssHint.setTextColor(0x77FFFFFF);
+        ssHint.setTextSize(13);
+        ssHint.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams ssHintLp = new LinearLayout.LayoutParams(-2, -2);
+        ssHintLp.topMargin = dp(20);
+        screensaverCard.addView(ssHint, ssHintLp);
+
+        FrameLayout.LayoutParams cardLp = new FrameLayout.LayoutParams(-2, -2);
+        cardLp.gravity = Gravity.CENTER;
+        screensaverOverlay.addView(screensaverCard, cardLp);
+        root.addView(screensaverOverlay, new FrameLayout.LayoutParams(-1, -1));
 
         setContentView(root);
     }
@@ -492,26 +709,64 @@ public class HomeActivity extends Activity {
         }
     }
 
+    private void updateGridZoom() {
+        if (grid == null) return;
+        boolean gridFocused = grid.hasFocus();
+        View selected = gridFocused ? grid.getSelectedView() : null;
+        for (int i = 0; i < grid.getChildCount(); i++) {
+            View child = grid.getChildAt(i);
+            boolean isTarget = (child == selected);
+            float targetScale = isTarget ? 1.08f : 1.0f;
+            float targetZ = isTarget ? dp(14) : 0f;
+            child.animate()
+                    .scaleX(targetScale)
+                    .scaleY(targetScale)
+                    .translationZ(targetZ)
+                    .setDuration(160)
+                    .start();
+        }
+    }
+
     private String getCurrentWallpaperName() {
-        int cur = prefs.getInt(KEY_WALL, 0);
-        if (cur < 0) return "Custom Photo";
-        return WALLPAPER_NAMES[cur % WALLPAPER_NAMES.length];
+        int cur = prefs.getInt(KEY_WALL, -2);
+        if (cur == -2) {
+            int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+            boolean isDay = (hour >= 6 && hour < 18);
+            return "Auto Day/Night \u2022 " + (isDay ? "Day" : "Night");
+        }
+        if (cur == -1) return "Custom Photo";
+        return WALLPAPER_NAMES[Math.max(0, cur) % WALLPAPER_NAMES.length];
     }
 
     private void showWallpaperPickerDialog() {
-        int cur = prefs.getInt(KEY_WALL, 0);
-        int checked = cur < 0 ? 0 : (cur % WALLPAPER_NAMES.length);
+        final String[] options = new String[WALLPAPER_NAMES.length + 1];
+        options[0] = "\uD83C\uDF17  Auto Day / Night Mode (Day: Bright Teal \u2022 Night: Electric Violet)";
+        for (int i = 0; i < WALLPAPER_NAMES.length; i++) {
+            options[i + 1] = WALLPAPER_NAMES[i];
+        }
+        int cur = prefs.getInt(KEY_WALL, -2);
+        int checked = (cur == -2) ? 0 : (Math.max(0, cur) % WALLPAPER_NAMES.length) + 1;
         new AlertDialog.Builder(this)
-                .setTitle("Choose Dual-Color Wallpaper (15 Themes)")
-                .setSingleChoiceItems(WALLPAPER_NAMES, checked, new android.content.DialogInterface.OnClickListener() {
+                .setTitle("Choose Wallpaper (Auto Day/Night + 15 Dual-Color Themes)")
+                .setSingleChoiceItems(options, checked, new android.content.DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(android.content.DialogInterface d, int which) {
-                        prefs.edit().putInt(KEY_WALL, which).apply();
-                        applyWallpaper();
-                        d.dismiss();
-                        Toast.makeText(HomeActivity.this,
-                                "Wallpaper: " + WALLPAPER_NAMES[which],
-                                Toast.LENGTH_SHORT).show();
+                        if (which == 0) {
+                            prefs.edit().putInt(KEY_WALL, -2).apply();
+                            applyWallpaper();
+                            d.dismiss();
+                            Toast.makeText(HomeActivity.this,
+                                    "Auto Day / Night Wallpaper Mode enabled",
+                                    Toast.LENGTH_SHORT).show();
+                        } else {
+                            int idx = which - 1;
+                            prefs.edit().putInt(KEY_WALL, idx).apply();
+                            applyWallpaper();
+                            d.dismiss();
+                            Toast.makeText(HomeActivity.this,
+                                    "Wallpaper: " + WALLPAPER_NAMES[idx],
+                                    Toast.LENGTH_SHORT).show();
+                        }
                     }
                 })
                 .setNegativeButton("Cancel", null)
@@ -522,6 +777,7 @@ public class HomeActivity extends Activity {
         final String[] opts = {
                 "\uD83C\uDFA8  Choose Dual-Color Wallpaper (" + getCurrentWallpaperName() + ")",
                 "\uD83D\uDD32  Round App Icon Edges (" + getCornerPercent() + "%  \u2022  5% to 50%)",
+                "\uD83C\uDF19  Start Ambient Screensaver Now (Auto: 5 min idle)",
                 "\u2630  More Fire Home Options (Hidden Apps, Weather)",
                 "\u2699\uFE0F  Fire TV System Settings"
         };
@@ -535,8 +791,10 @@ public class HomeActivity extends Activity {
                         } else if (which == 1) {
                             showCornerRoundnessDialog();
                         } else if (which == 2) {
-                            showMainMenu();
+                            startScreensaver();
                         } else if (which == 3) {
+                            showMainMenu();
+                        } else if (which == 4) {
                             openSystemSettingsDirect();
                         }
                     }
@@ -545,9 +803,10 @@ public class HomeActivity extends Activity {
     }
 
     private void applyWallpaper() {
+        int mode = prefs.getInt(KEY_WALL, -2);
         File dir = getExternalFilesDir(null);
         File custom = dir == null ? null : new File(dir, "wallpaper.jpg");
-        if (custom != null && custom.exists() && prefs.getInt(KEY_WALL, 0) == -1) {
+        if (custom != null && custom.exists() && mode == -1) {
             try {
                 BitmapFactory.Options o = new BitmapFactory.Options();
                 o.inSampleSize = 1;
@@ -560,7 +819,14 @@ public class HomeActivity extends Activity {
             } catch (Throwable ignored) {
             }
         }
-        int idx = Math.max(0, prefs.getInt(KEY_WALL, 0)) % GRADIENTS.length;
+        int idx;
+        if (mode == -2) {
+            int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+            // Daytime (6 AM - 6 PM): Emerald Mint & Deep Teal (0); Nighttime: Electric Violet & Deep Plum (4)
+            idx = (hour >= 6 && hour < 18) ? 0 : 4;
+        } else {
+            idx = Math.max(0, mode) % GRADIENTS.length;
+        }
         GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TL_BR, GRADIENTS[idx]);
         wallpaper.setImageDrawable(g);
     }
@@ -570,6 +836,7 @@ public class HomeActivity extends Activity {
                 "Choose Dual-Color Wallpaper (" + getCurrentWallpaperName() + ")",
                 "Next Dual-Color Wallpaper",
                 "Round App Icon Edges (" + getCornerPercent() + "%  \u2022  5% to 50%)",
+                "Start Ambient Screensaver Now (Auto: 5 min idle)",
                 "Use custom wallpaper (wallpaper.jpg)",
                 "Show hidden apps",
                 "Refresh weather",
@@ -595,6 +862,9 @@ public class HomeActivity extends Activity {
                         showCornerRoundnessDialog();
                         break;
                     case 3:
+                        startScreensaver();
+                        break;
+                    case 4:
                         File dir = getExternalFilesDir(null);
                         File f = dir == null ? null : new File(dir, "wallpaper.jpg");
                         if (f != null && f.exists()) {
@@ -606,13 +876,13 @@ public class HomeActivity extends Activity {
                                     Toast.LENGTH_LONG).show();
                         }
                         break;
-                    case 4:
+                    case 5:
                         showHiddenApps();
                         break;
-                    case 5:
+                    case 6:
                         fetchWeather();
                         break;
-                    case 6:
+                    case 7:
                         openSystemSettingsDirect();
                         break;
                 }
@@ -707,7 +977,7 @@ public class HomeActivity extends Activity {
             Intent q = new Intent(Intent.ACTION_MAIN).addCategory(cat);
             for (ResolveInfo ri : pm.queryIntentActivities(q, 0)) {
                 String pkg = ri.activityInfo.packageName;
-                if (pkg.equals(getPackageName()) || map.containsKey(pkg)) continue;
+                if (pkg.equals(getPackageName()) || "com.netflix.ninja".equals(pkg) || map.containsKey(pkg)) continue;
                 AppItem a = new AppItem();
                 a.id = pkg;
                 a.label = String.valueOf(ri.loadLabel(pm));
@@ -724,6 +994,7 @@ public class HomeActivity extends Activity {
                     }
                 }
                 a.icon = ri.loadIcon(pm);
+                a.cardColors = extractCardGradientFromIcon(a.icon, a.id);
                 Intent l = new Intent(Intent.ACTION_MAIN).addCategory(cat);
                 l.setClassName(pkg, ri.activityInfo.name);
                 l.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
@@ -739,6 +1010,56 @@ public class HomeActivity extends Activity {
             }
         });
         return list;
+    }
+
+    private int[] extractCardGradientFromIcon(Drawable d, String fallbackId) {
+        int fallbackAccent = BANNER_ACCENTS[Math.abs(fallbackId.hashCode()) % BANNER_ACCENTS.length];
+        if (d == null) {
+            return new int[]{fallbackAccent, 0xFF141820};
+        }
+        try {
+            int size = 32;
+            Bitmap bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(bmp);
+            d.setBounds(0, 0, size, size);
+            d.draw(canvas);
+
+            float sumR = 0f, sumG = 0f, sumB = 0f, totalWeight = 0f;
+            float[] hsv = new float[3];
+            for (int y = 2; y < size - 2; y++) {
+                for (int x = 2; x < size - 2; x++) {
+                    int px = bmp.getPixel(x, y);
+                    int alpha = (px >>> 24) & 0xFF;
+                    if (alpha < 140) continue;
+                    Color.colorToHSV(px, hsv);
+                    float sat = hsv[1];
+                    float val = hsv[2];
+                    // Favor rich, saturated brand colors over pure white or pure black backgrounds
+                    if (sat >= 0.22f && val >= 0.18f) {
+                        float weight = sat * sat * (0.4f + val);
+                        sumR += ((px >> 16) & 0xFF) * weight;
+                        sumG += ((px >> 8) & 0xFF) * weight;
+                        sumB += (px & 0xFF) * weight;
+                        totalWeight += weight;
+                    }
+                }
+            }
+            bmp.recycle();
+
+            if (totalWeight > 0.05f) {
+                int avgR = Math.round(sumR / totalWeight);
+                int avgG = Math.round(sumG / totalWeight);
+                int avgB = Math.round(sumB / totalWeight);
+                Color.RGBToHSV(avgR, avgG, avgB, hsv);
+                float hue = hsv[0];
+                float sat = Math.min(0.86f, Math.max(0.55f, hsv[1]));
+                int topColor = Color.HSVToColor(new float[]{hue, sat, 0.56f});
+                int bottomColor = Color.HSVToColor(new float[]{hue, Math.min(0.92f, sat + 0.08f), 0.20f});
+                return new int[]{topColor, bottomColor};
+            }
+        } catch (Throwable ignored) {
+        }
+        return new int[]{fallbackAccent, 0xFF141820};
     }
 
     private boolean initialFocusSet = false;
@@ -787,6 +1108,14 @@ public class HomeActivity extends Activity {
                 public void run() {
                     grid.requestFocus();
                     grid.setSelection(0);
+                    updateGridZoom();
+                }
+            });
+        } else if (grid != null) {
+            grid.post(new Runnable() {
+                @Override
+                public void run() {
+                    updateGridZoom();
                 }
             });
         }
@@ -837,6 +1166,9 @@ public class HomeActivity extends Activity {
                         @Override
                         public void run() {
                             weatherView.setText(text);
+                            if (screensaverWeatherView != null) {
+                                screensaverWeatherView.setText(text);
+                            }
                         }
                     });
                 } catch (Throwable t) {
@@ -1017,15 +1349,24 @@ public class HomeActivity extends Activity {
 
             AppItem a = items.get(pos);
             GradientDrawable cardBg = new GradientDrawable();
-            int accent = BANNER_ACCENTS[Math.abs(a.id.hashCode()) % BANNER_ACCENTS.length];
-            cardBg.setColors(new int[]{accent, 0xFF141820});
+            if (a.cardColors != null && a.cardColors.length == 2) {
+                cardBg.setColors(a.cardColors);
+            } else {
+                int accent = BANNER_ACCENTS[Math.abs(a.id.hashCode()) % BANNER_ACCENTS.length];
+                cardBg.setColors(new int[]{accent, 0xFF141820});
+            }
             cardBg.setOrientation(GradientDrawable.Orientation.TL_BR);
             cardBg.setCornerRadius(cardRadius);
-            cardBg.setStroke(dp(1), 0x33FFFFFF);
+            cardBg.setStroke(dp(1), 0x44FFFFFF);
             cardBox.setBackground(cardBg);
             cardBox.invalidateOutline();
             fullBannerView.invalidateOutline();
             smallIconView.invalidateOutline();
+
+            boolean isSelectedTile = (grid != null && grid.hasFocus() && grid.getSelectedItemPosition() == pos);
+            rootTile.setScaleX(isSelectedTile ? 1.08f : 1.0f);
+            rootTile.setScaleY(isSelectedTile ? 1.08f : 1.0f);
+            rootTile.setTranslationZ(isSelectedTile ? dp(14) : 0f);
 
             if (a.banner != null) {
                 fullBannerView.setVisibility(View.VISIBLE);

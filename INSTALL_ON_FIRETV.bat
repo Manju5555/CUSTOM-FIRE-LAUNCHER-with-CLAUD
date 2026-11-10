@@ -1,7 +1,7 @@
 @echo off
-title FIRE TV CUSTOM HS VER1 - One-Click Installer
+title FIRE TV CUSTOM HS VER2 - One-Click Installer
 echo ========================================================
-echo   FIRE TV CUSTOM HS VER1 - One-Click Fire TV Installer
+echo   FIRE TV CUSTOM HS VER2 - One-Click Fire TV Installer
 echo ========================================================
 echo.
 set /p FIRE_IP="Enter Fire TV IP address (press Enter for default 192.168.29.29): "

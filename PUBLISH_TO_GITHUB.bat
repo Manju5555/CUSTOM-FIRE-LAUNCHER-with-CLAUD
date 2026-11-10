@@ -17,7 +17,7 @@ if errorlevel 1 (
 
 echo.
 echo Step 2: Creating GitHub repository "CUSTOM-FIRE-LAUNCHER-with-CLAUD" and pushing files...
-gh repo create "CUSTOM-FIRE-LAUNCHER-with-CLAUD" --public --description "CUSTOM FIRE LAUNCHER with CLAUD - Custom ad-free Amazon Fire TV Home Screen Launcher (FIRE TV CUSTOM HS VER1)" --source=. --remote=origin --push
+gh repo create "CUSTOM-FIRE-LAUNCHER-with-CLAUD" --public --description "CUSTOM FIRE LAUNCHER with CLAUD - Custom ad-free Amazon Fire TV Home Screen Launcher (FIRE TV CUSTOM HS VER2)" --source=. --remote=origin --push
 
 echo.
 echo =================================================================

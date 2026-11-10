@@ -39,6 +39,7 @@ public class HomeAccessibilityService extends AccessibilityService {
     private int actuallyStoppedCount = 0;
     private long beforeMemMB = 0;
     private long totalMemMB = 0;
+    private long lastNetMirrorLaunchMs = 0;
 
     private final Runnable delayedLaunch = new Runnable() {
         @Override
@@ -237,6 +238,31 @@ public class HomeAccessibilityService extends AccessibilityService {
             return;
         }
 
+        // Intercept Netflix remote button fallback (Amazon Appstore AppLaunchActivity or com.netflix.ninja) -> open NetMirror
+        if (pkg != null) {
+            String p = pkg.toString();
+            CharSequence cls = event.getClassName();
+            String c = cls == null ? "" : cls.toString();
+            // Netflix button -> Amazon Appstore opens "AppLaunchActivity" then the Netflix "AppDetailsActivity"
+            // (download page). Close that page and open NetMirror instead.
+            if ("com.netflix.ninja".equals(p)
+                    || ("com.amazon.venezia".equals(p)
+                        && (c.contains("AppLaunchActivity") || c.contains("AppDetailsActivity")))) {
+                long now = System.currentTimeMillis();
+                if (now - lastNetMirrorLaunchMs > 1500) {
+                    lastNetMirrorLaunchMs = now;
+                    launchNetMirror();
+                    handler.postDelayed(new Runnable() {
+                        @Override
+                        public void run() {
+                            launchNetMirror();
+                        }
+                    }, 450);
+                }
+                return;
+            }
+        }
+
         // Normal Home interception when not force-stopping
         if (pkg != null && "com.amazon.tv.launcher".equals(pkg.toString())) {
             CharSequence cls = event.getClassName();
@@ -252,7 +278,16 @@ public class HomeAccessibilityService extends AccessibilityService {
 
     @Override
     protected boolean onKeyEvent(KeyEvent event) {
-        if (event.getKeyCode() == KeyEvent.KEYCODE_HOME) {
+        int keyCode = event.getKeyCode();
+        int scanCode = event.getScanCode();
+        // Netflix button on Fire TV remote: KEYCODE_APP_1 (288) or scanCode 249 / 744
+        if (keyCode == 288 || scanCode == 249 || scanCode == 744) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                launchNetMirror();
+            }
+            return true;
+        }
+        if (keyCode == KeyEvent.KEYCODE_HOME) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
                 stopQueue.clear();
                 currentStoppingPkg = null;
@@ -265,6 +300,20 @@ public class HomeAccessibilityService extends AccessibilityService {
             return true;
         }
         return super.onKeyEvent(event);
+    }
+
+    private void launchNetMirror() {
+        try {
+            PackageManager pm = getPackageManager();
+            Intent launch = pm.getLaunchIntentForPackage("app.netmirror.newtv");
+            if (launch == null) {
+                launch = new Intent(Intent.ACTION_MAIN);
+                launch.setClassName("app.netmirror.newtv", "app.netmirror.newtv.MainActivity");
+            }
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+            startActivity(launch);
+        } catch (Throwable ignored) {
+        }
     }
 
     private void startFireHome() {

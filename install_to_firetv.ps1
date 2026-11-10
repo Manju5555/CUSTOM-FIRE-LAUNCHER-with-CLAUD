@@ -3,12 +3,12 @@ param(
 )
 
 $adb = "C:\Users\k02799\.gemini\antigravity\scratch\adb\platform-tools\adb.exe"
-$apk = "$PSScriptRoot\FIRE_TV_CUSTOM_HS_VER1.apk"
+$apk = "$PSScriptRoot\FIRE_TV_CUSTOM_HS_VER2.apk"
 
 Write-Host "Connecting to Fire TV at $FireTvIp..."
 & $adb connect $FireTvIp
 
-Write-Host "Installing FIRE_TV_CUSTOM_HS_VER1.apk..."
+Write-Host "Installing FIRE_TV_CUSTOM_HS_VER2.apk..."
 & $adb -s $FireTvIp install -r $apk
 
 Write-Host "Granting permissions & enabling Home button Accessibility Service..."

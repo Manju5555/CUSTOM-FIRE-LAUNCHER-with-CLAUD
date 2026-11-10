@@ -41,6 +41,6 @@ if (!(Test-Path $ks)) {
     & "$jdk\bin\keytool.exe" -genkeypair -keystore $ks -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=FireHome,O=Android,C=US"
 }
 & "$bt\apksigner.bat" sign --ks $ks --ks-pass pass:android --key-pass pass:android --out "$out\FireHome.apk" "$out\apk\aligned.apk"
-Copy-Item -Path "$out\FireHome.apk" -Destination "$root\FIRE_TV_CUSTOM_HS_VER1.apk" -Force
+Copy-Item -Path "$out\FireHome.apk" -Destination "$root\FIRE_TV_CUSTOM_HS_VER2.apk" -Force
 
-Get-Item "$root\FIRE_TV_CUSTOM_HS_VER1.apk" | Select-Object FullName, Length
+Get-Item "$root\FIRE_TV_CUSTOM_HS_VER2.apk" | Select-Object FullName, Length
