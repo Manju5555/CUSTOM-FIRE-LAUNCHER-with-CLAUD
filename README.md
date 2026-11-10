@@ -6,16 +6,9 @@ A fast, lightweight, ad-free custom Home Screen Launcher built for Amazon Fire T
 
 ---
 
-## 🖼️ Home Screen Previews
+## 🖼️ Home Screen Preview
 
-### 1. Electric Violet & Deep Plum Theme
-![Fire Home - Electric Violet Theme](HOME_SCREEN_PREVIEW.png)
-
-### 2. Sunset Coral & Deep Berry Theme
-![Fire Home - Sunset Coral Theme](HOME_SCREEN_CORAL.png)
-
-### 3. Classic Midnight Slate Theme
-![Fire Home - Classic Midnight Theme](HOME_SCREEN_DARK.png)
+![Fire Home Screen](HOME_SCREEN_PREVIEW.jpg)
 
 ---
 
@@ -39,14 +32,3 @@ A fast, lightweight, ad-free custom Home Screen Launcher built for Amazon Fire T
 2. **Or One-Click PC Installer**:
    - Enable **ADB Debugging** on your Fire TV (*Settings → My Fire TV → Developer Options → ADB Debugging*).
    - Double-click **`INSTALL_ON_FIRETV.bat`** (or run `install_to_firetv.ps1 -FireTvIp <YOUR_FIRE_TV_IP>:5555`).
-
----
-
-## 🛠️ Project Structure
-- `FIRE_TV_CUSTOM_HS_VER1.apk` — Pre-built signed APK ready to install on any Fire TV.
-- `HOME_SCREEN_PREVIEW.png` / `HOME_SCREEN_CORAL.png` / `HOME_SCREEN_DARK.png` — Live Fire TV home screen screenshots.
-- `app/src/main/java/com/prasad/firehome/HomeActivity.java` — Main launcher UI, 5-column adapter, 5%–50% corner rounding, 15 dual-color wallpapers, weather, and RAM cleaner.
-- `app/src/main/java/com/prasad/firehome/HomeAccessibilityService.java` — Home button interceptor and automated `"Force stop"` assistant.
-- `app/src/main/AndroidManifest.xml` — Android Manifest & permissions.
-- `fast_build.ps1` / `BUILD_APK.bat` — Fast ~4-second build script using `aapt2`, `javac`, `d8`, `zipalign`, and `apksigner`.
-- `install_to_firetv.ps1` / `INSTALL_ON_FIRETV.bat` — One-click ADB installer and Home button accessibility configurator.
