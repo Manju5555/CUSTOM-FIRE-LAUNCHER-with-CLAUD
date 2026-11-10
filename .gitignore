@@ -1,0 +1,5 @@
+# Ignore intermediate build outputs, keep final signed APK
+build_out/
+*.zip
+*.idsig
+local.properties
